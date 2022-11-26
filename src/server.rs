@@ -1,8 +1,10 @@
+use std::future::Future;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, mpsc, Semaphore};
 use crate::{Connection, Shutdown};
 use tracing::{debug, error, info, instrument};
 use tokio::time::{self, Duration};
+use std::str;
 
 #[derive(Debug)]
 struct Listener {
@@ -78,9 +80,46 @@ impl Handler {
                 None => return Ok(()),
             };
             
-            self.connection.write(res).await?
+            let speak = str::from_utf8(&res).unwrap();
+            
+            println!("received: {}", speak);
+
+            tokio::select! {
+                res = self.connection.write(&res) => res?,
+                _ = self.shutdown.recv() => {
+                    return Ok(())
+                }
+            };
         }
 
         Ok(())
+    }
+}
+
+pub async fn run(listener: TcpListener, shutdown: impl Future) {
+    let (notify_shutdown, _) = broadcast::channel(1);
+
+    // Initialize the listener state
+    let mut server = Listener {
+        listener,
+        notify_shutdown,
+    };
+
+    tokio::select! {
+        res = server.run() => {
+            // If an error is received here, accepting connections from the TCP
+            // listener failed multiple times and the server is giving up and
+            // shutting down.
+            //
+            // Errors encountered when handling individual connections do not
+            // bubble up to this point.
+            if let Err(err) = res {
+                error!(cause = %err, "failed to accept");
+            }
+        }
+        _ = shutdown => {
+            // The shutdown signal has been received.
+            info!("shutting down");
+        }
     }
 }

@@ -4,6 +4,8 @@ mod shutdown;
 use shutdown::Shutdown;
 
 mod connection;
+mod frame;
+
 pub use connection::Connection;
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
